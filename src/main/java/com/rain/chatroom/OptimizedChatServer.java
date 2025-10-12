@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class OptimizedChatServer {
     private ServerSocket serverSocket;
+    // 场景特点
+    // 读多写少：大量消息广播(读) vs 较少的连接/断开(写)
+    //高并发读：需要同时向所有客户端发送消息
+    //不能阻塞：广播消息时不能因为有人连接/断开而中断
     private static final CopyOnWriteArraySet<ClientSession> clientSessions = new CopyOnWriteArraySet<>();
 
     // 自定义命名的线程工厂
@@ -129,6 +133,7 @@ public class OptimizedChatServer {
                 out = new PrintWriter(clientSocket.getOutputStream(), true);
 
                 // 注册客户端
+                // 客户端连接时添加到集合（写操作）
                 clientSessions.add(this);
 
                 // 身份验证流程
@@ -193,6 +198,7 @@ public class OptimizedChatServer {
             System.out.println("广播消息: " + formattedMessage);
 
             // 使用CopyOnWriteArraySet不需要显式同步
+            // 广播消息时遍历所有客户端（读操作）
             for (ClientSession session : clientSessions) {
                 if (session != this) { // 不发送给自己
                     session.sendMessage(formattedMessage);
@@ -224,6 +230,7 @@ public class OptimizedChatServer {
         private void cleanup() {
             try {
                 if (out != null) {
+                    // 客户端断开时从集合移除（写操作）
                     clientSessions.remove(this);
                 }
                 if (clientName != null) {
