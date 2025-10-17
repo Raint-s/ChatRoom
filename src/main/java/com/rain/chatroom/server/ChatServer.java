@@ -1,40 +1,49 @@
 package com.rain.chatroom.server;
 
+import com.rain.chatroom.server.config.ThreadPoolConfig;
 import com.rain.chatroom.server.handler.ClientSession;
 import com.rain.chatroom.server.manager.SessionManager;
+import com.rain.chatroom.server.service.BroadcastService;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
+@Slf4j
 public class ChatServer {
     private final int port;
     private final SessionManager sessionManager;
-    private final ExecutorService threadPool;
+    private final BroadcastService broadcastService;
+    private final ThreadPoolExecutor threadPool;
     private volatile boolean running = false;
 
     public ChatServer(int port) {
         this.port = port;
         this.sessionManager = new SessionManager();
-        this.threadPool = Executors.newFixedThreadPool(10);
+        this.broadcastService = new BroadcastService(sessionManager);
+        this.threadPool = ThreadPoolConfig.createChatThreadPool();
     }
 
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             running = true;
-            System.out.println("聊天服务器启动在端口: " + port);
+            log.info("聊天服务器启动在端口: {}", port);
 
-            while (running) {
+            // 添加关闭钩子
+            Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
+
+            while (running && !Thread.currentThread().isInterrupted()) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("客户端连接: " + clientSocket.getInetAddress());
+                log.info("客户端连接: {}", clientSocket.getInetAddress());
 
+                // 提交客户端处理任务到线程池
                 threadPool.execute(() -> handleClient(clientSocket));
             }
 
         } catch (Exception e) {
-            System.err.println("服务器异常: " + e.getMessage());
+            log.error("服务器异常: {}", e.getMessage());
         } finally {
             shutdown();
         }
@@ -52,15 +61,15 @@ public class ChatServer {
                 return;
             }
 
-            // 通知其他用户
-            sessionManager.broadcastToAll("[系统] " + session.getUsername() + " 加入了聊天室");
+            // 通知其他用户 - 使用BroadcastService
+            broadcastService.sendSystemMessage(session.getUsername() + " 加入了聊天室");
             session.sendMessage("欢迎 " + session.getUsername() + "! 输入 'bye' 退出");
 
             // 消息处理循环
             processClientMessages(session);
 
         } catch (Exception e) {
-            System.err.println("处理客户端异常: " + e.getMessage());
+            log.error("处理客户端异常: {}", e.getMessage());
         } finally {
             // 清理资源
             cleanupSession(session);
@@ -69,12 +78,7 @@ public class ChatServer {
 
     private boolean authenticate(ClientSession session) throws IOException {
         session.sendMessage("请输入你的昵称:");
-        String username = null;
-        try {
-            username = session.readMessage();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        String username = session.readMessage();
 
         if (username == null || username.trim().isEmpty()) {
             session.sendMessage("昵称不能为空");
@@ -93,16 +97,16 @@ public class ChatServer {
                 break;
             }
 
-            // 广播用户消息
+            // 广播用户消息 - 使用BroadcastService
             String formattedMessage = "[" + session.getUsername() + "]: " + message;
-            System.out.println("广播消息: " + formattedMessage);
-            sessionManager.broadcastToAll(formattedMessage, session);
+            broadcastService.broadcastToAll(formattedMessage, session);
         }
     }
 
     private void cleanupSession(ClientSession session) {
         if (session.getUsername() != null) {
-            sessionManager.broadcastToAll("[系统] " + session.getUsername() + " 离开了聊天室");
+            // 使用BroadcastService发送系统消息
+            broadcastService.sendSystemMessage(session.getUsername() + " 离开了聊天室");
         }
         sessionManager.removeSession(session.getClientId());
         session.close();
@@ -111,7 +115,7 @@ public class ChatServer {
     private void shutdown() {
         running = false;
         threadPool.shutdown();
-        System.out.println("服务器已关闭");
+        log.info("服务器已关闭");
     }
 
     public static void main(String[] args) {
