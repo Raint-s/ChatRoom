@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+// 消息模型，定义消息类型和内容
 public class ChatMessage {
     public enum MessageType {
         TEXT, SYSTEM, COMMAND, PRIVATE

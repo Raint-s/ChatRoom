@@ -1,6 +1,8 @@
 package com.rain.chatroom.server;
 
 import com.rain.chatroom.server.config.ThreadPoolConfig;
+import com.rain.chatroom.server.dao.MessageDao;
+import com.rain.chatroom.server.dao.UserDao;
 import com.rain.chatroom.server.handler.ClientSession;
 import com.rain.chatroom.server.manager.SessionManager;
 import com.rain.chatroom.server.service.BroadcastService;
@@ -19,6 +21,10 @@ public class ChatServer {
     private final ThreadPoolExecutor threadPool;
     private volatile boolean running = false;
 
+    // 在ChatServer类中添加
+    private final UserDao userDao = new UserDao();
+    private final MessageDao messageDao = new MessageDao();
+
     public ChatServer(int port) {
         this.port = port;
         this.sessionManager = new SessionManager();
@@ -30,6 +36,9 @@ public class ChatServer {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             running = true;
             log.info("聊天服务器启动在端口: {}", port);
+
+            // 启动监控
+            startMonitor();
 
             // 添加关闭钩子
             Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
@@ -47,6 +56,27 @@ public class ChatServer {
         } finally {
             shutdown();
         }
+    }
+
+    // 在ChatServer.java中添加监控方法
+    private void startMonitor() {
+        Thread monitorThread = new Thread(() -> {
+            while (running) {
+                try {
+                    Thread.sleep(30000); // 每30秒输出一次状态
+                    log.info("服务器状态 - 活跃线程: {}/{}, 队列大小: {}, 完成任务: {}",
+                            threadPool.getActiveCount(),
+                            threadPool.getPoolSize(),
+                            threadPool.getQueue().size(),
+                            threadPool.getCompletedTaskCount());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }, "server-monitor");
+        monitorThread.setDaemon(true);
+        monitorThread.start();
     }
 
     private void handleClient(Socket clientSocket) {
@@ -76,19 +106,104 @@ public class ChatServer {
         }
     }
 
-    private boolean authenticate(ClientSession session) throws IOException {
-        session.sendMessage("请输入你的昵称:");
-        String username = session.readMessage();
+//    private boolean authenticate(ClientSession session) throws IOException {
+//        session.sendMessage("请输入你的昵称:");
+//        String username = session.readMessage();
+//
+//        if (username == null || username.trim().isEmpty()) {
+//            session.sendMessage("昵称不能为空");
+//            return false;
+//        }
+//
+//        session.setUsername(username.trim());
+//        return true;
+//    }
 
-        if (username == null || username.trim().isEmpty()) {
-            session.sendMessage("昵称不能为空");
+    // 修改认证流程
+    private boolean authenticate(ClientSession session) throws IOException {
+        session.sendMessage("请选择: 1. 登录 2. 注册");
+        String choice = session.readMessage();
+
+        if ("1".equals(choice)) {
+            return login(session);
+        } else if ("2".equals(choice)) {
+            return register(session);
+        } else {
+            session.sendMessage("无效选择，连接关闭");
+            return false;
+        }
+    }
+
+    private boolean login(ClientSession session) throws IOException {
+        session.sendMessage("请输入用户名:");
+        String username = session.readMessage();
+        session.sendMessage("请输入密码:");
+        String password = session.readMessage();
+
+        UserDao.User user = userDao.findUserByUsername(username);
+        if (user != null && user.getPassword().equals(password)) { // 实际应该加密验证
+            userDao.updateUserLoginTime(user.getId());
+            session.setUser(user);
+            session.setUsername(user.getNickname());
+            session.sendMessage("登录成功！欢迎 " + user.getNickname());
+            return true;
+        } else {
+            session.sendMessage("登录失败，用户名或密码错误");
+            return false;
+        }
+    }
+
+    private boolean register(ClientSession session) throws IOException {
+        session.sendMessage("请输入用户名:");
+        String username = session.readMessage();
+        session.sendMessage("请输入密码:");
+        String password = session.readMessage();
+        session.sendMessage("请输入昵称:");
+        String nickname = session.readMessage();
+        session.sendMessage("请输入邮箱(可选):");
+        String email = session.readMessage();
+
+        if (username.isEmpty() || password.isEmpty() || nickname.isEmpty()) {
+            session.sendMessage("用户名、密码和昵称不能为空");
             return false;
         }
 
-        session.setUsername(username.trim());
-        return true;
+        if (userDao.findUserByUsername(username) != null) {
+            session.sendMessage("用户名已存在");
+            return false;
+        }
+
+        if (userDao.createUser(username, password, nickname, email)) {
+            session.sendMessage("注册成功！请登录");
+            return login(session);
+        } else {
+            session.sendMessage("注册失败，请重试");
+            return false;
+        }
     }
 
+    // 在ChatServer.java的processClientMessages方法中修改
+//    private void processClientMessages(ClientSession session) throws IOException {
+//        String message;
+//        while ((message = session.readMessage()) != null && session.isActive()) {
+//            if ("bye".equalsIgnoreCase(message)) {
+//                session.sendMessage("再见!");
+//                break;
+//            }
+//
+//            // 检查是否是命令
+//            if (message.startsWith("/")) {
+//                broadcastService.handleCommand(session, message);
+//            } else {
+//                // 广播用户消息
+//                String formattedMessage = "[" + session.getUsername() + "]: " + message;
+//                System.out.println("广播消息: " + formattedMessage);
+//                broadcastService.broadcastToAll(formattedMessage, session);
+//            }
+//        }
+//    }
+
+    // 修改消息处理，添加持久化
     private void processClientMessages(ClientSession session) throws IOException {
         String message;
         while ((message = session.readMessage()) != null && session.isActive()) {
@@ -97,11 +212,30 @@ public class ChatServer {
                 break;
             }
 
-            // 广播用户消息 - 使用BroadcastService
-            String formattedMessage = "[" + session.getUsername() + "]: " + message;
-            broadcastService.broadcastToAll(formattedMessage, session);
+            // 检查是否是命令
+            if (message.startsWith("/")) {
+                handleCommand(session, message);
+            } else {
+                // 广播用户消息并保存到数据库
+                String formattedMessage = "[" + session.getUsername() + "]: " + message;
+                System.out.println("广播消息: " + formattedMessage);
+
+                // 保存到数据库 (群聊消息，group_id为null)
+                UserDao.User user = session.getUser();
+                if (user != null) {
+                    messageDao.saveMessage(2, user.getId(), null, null, message, 1, null);
+                }
+
+                broadcastService.broadcastToAll(formattedMessage, session);
+            }
         }
     }
+
+    // 在 ChatServer 类中添加如下方法
+    private void handleCommand(ClientSession session, String command) {
+        broadcastService.handleCommand(session, command);
+    }
+
 
     private void cleanupSession(ClientSession session) {
         if (session.getUsername() != null) {

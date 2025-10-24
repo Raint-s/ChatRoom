@@ -1,6 +1,7 @@
 package com.rain.chatroom.server.handler;
 
 import com.rain.chatroom.common.model.ClientInfo;
+import com.rain.chatroom.server.dao.UserDao;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -20,9 +21,21 @@ public class ClientSession {
     @Getter
     private final Socket socket;
 
+    //这边关联用户信息
+    private UserDao.User user;
+
     private PrintWriter writer;
     private BufferedReader reader;
     private volatile boolean active = true;
+
+    // 在ClientSession中添加用户信息
+    public void setUser(UserDao.User user) {
+        this.user = user;
+    }
+
+    public UserDao.User getUser() {
+        return user;
+    }
 
     public ClientSession(Socket socket) {
         this.clientId = UUID.randomUUID().toString();

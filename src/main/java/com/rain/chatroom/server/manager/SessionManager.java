@@ -12,19 +12,20 @@ import java.util.concurrent.ConcurrentMap;
  * 会话管理器 - 负责客户端会话的注册、查找、移除
  */
 //SessionManager：负责管理客户端的会话（注册、移除、查找等）
+//管理最小单位是ClientSession，每一个ClientSession对应各自的socket信息、input output、状态（离线、在线）管理
 @Slf4j
 public class SessionManager {
     private final ConcurrentMap<String, ClientSession> sessions = new ConcurrentHashMap<>();
 
     public void registerSession(ClientSession session) {
         sessions.put(session.getClientId(), session);
-//        log.info("用户注册: {}, 当前在线: {}", session.getUsername(), sessions.size());
+        log.info("用户注册: {}, 当前在线: {}", session.getUsername(), sessions.size());
     }
 
     public void removeSession(String clientId) {
         ClientSession session = sessions.remove(clientId);
         if (session != null) {
-//            log.info("用户移除: {}, 剩余在线: {}", session.getUsername(), sessions.size());
+            log.info("用户移除: {}, 剩余在线: {}", session.getUsername(), sessions.size());
         }
     }
 
