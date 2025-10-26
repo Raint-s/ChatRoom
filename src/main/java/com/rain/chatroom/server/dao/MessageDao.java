@@ -76,6 +76,64 @@ public class MessageDao {
         return messages;
     }
 
+    // 在MessageDao中添加
+    public boolean savePrivateMessage(Long fromUserId, Long toUserId, String content) {
+        return saveMessage(1, fromUserId, toUserId, null, content, 1, null);
+    }
+
+    public List<ChatMessage> getUnreadMessages(Long userId) {
+        List<ChatMessage> messages = new ArrayList<>();
+        String sql = "SELECT cm.*, u.nickname as from_nickname " +
+                "FROM chat_messages cm " +
+                "LEFT JOIN users u ON cm.from_user_id = u.id " +
+                "WHERE cm.to_user_id = ? AND cm.is_read = 0 " +
+                "ORDER BY cm.created_time ASC";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, userId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                ChatMessage message = new ChatMessage();
+                message.setId(rs.getLong("id"));
+                message.setMessageType(rs.getInt("message_type"));
+                message.setFromUserId(rs.getLong("from_user_id"));
+                message.setToUserId(rs.getLong("to_user_id"));
+                message.setFromNickname(rs.getString("from_nickname"));
+                message.setContent(rs.getString("content"));
+                message.setContentType(rs.getInt("content_type"));
+                message.setCreatedTime(rs.getTimestamp("created_time"));
+                messages.add(message);
+            }
+
+            // 标记为已读
+            if (!messages.isEmpty()) {
+                markMessagesAsRead(userId);
+            }
+
+        } catch (SQLException e) {
+            log.error("获取未读消息失败: {}", e.getMessage());
+        }
+
+        return messages;
+    }
+
+    private void markMessagesAsRead(Long userId) {
+        String sql = "UPDATE chat_messages SET is_read = 1 WHERE to_user_id = ? AND is_read = 0";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setLong(1, userId);
+            pstmt.executeUpdate();
+
+        } catch (SQLException e) {
+            log.error("标记消息已读失败: {}", e.getMessage());
+        }
+    }
+
     public static class ChatMessage {
         private Long id;
         private Integer messageType;
