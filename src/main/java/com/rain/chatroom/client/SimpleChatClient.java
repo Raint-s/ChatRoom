@@ -39,7 +39,20 @@ public class SimpleChatClient {
                 try {
                     String serverResponse;
                     while ((serverResponse = in.readLine()) != null) {
-                        System.out.println("服务器: " + serverResponse);
+                        // 跳过空行
+                        if (serverResponse.trim().isEmpty()) {
+                            continue;
+                        }
+
+                        // 如果是系统消息（已经包含前缀），直接显示
+                        if (serverResponse.startsWith("[系统]") ||
+                                serverResponse.startsWith("[私聊]") ||
+                                serverResponse.startsWith("[群聊]")) {
+                            System.out.println(serverResponse);
+                        } else {
+                            // 其他消息添加前缀
+                            System.out.println("服务器: " + serverResponse);
+                        }
                     }
                 } catch (IOException e) {
                     System.out.println("与服务器断开连接");

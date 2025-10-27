@@ -13,6 +13,19 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ThreadPoolExecutor;
 
+/**
+ * 处理客户端消息
+ *
+ * 设计思路：
+ * 1. 使用线程池处理并发连接
+ * 2. 每个会话独立线程，避免阻塞
+ * 3. 消息广播使用CopyOnWriteArraySet保证线程安全
+ *
+ * 性能考虑：
+ * - 读多写少场景使用CopyOnWriteArraySet
+ * - 消息发送使用异步非阻塞方式
+ * - 数据库操作使用连接池
+ */
 @Slf4j
 public class ChatServer {
     private final int port;
